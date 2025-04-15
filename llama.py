@@ -2,6 +2,9 @@ from flask import Blueprint, jsonify, request
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain_groq import ChatGroq
+from .speaking_evaluation import evaluator
+import os
+import tempfile
 
 lm = Blueprint('lm', __name__)
 
@@ -96,3 +99,71 @@ def chatbot():
     except Exception as e:
         print("An error occurred:", e)
         return jsonify({"error": "An internal error occurred"}), 500
+
+
+
+
+
+
+# Add this near your imports
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+@lm.route('/evaluate_speaking', methods=['POST'])
+def handle_speaking_evaluation():
+    # Validate inputs
+    if 'audio' not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+    if 'question' not in request.form:
+        return jsonify({"error": "Question text missing"}), 400
+        
+    audio_file = request.files['audio']
+    original_question = request.form['question']
+    test_part = request.form.get('part', 'Part 1')
+    
+    # Validate audio file
+    audio_file.seek(0, 2)  # Seek to end
+    file_size = audio_file.tell()
+    audio_file.seek(0)
+    
+    if file_size > MAX_FILE_SIZE:
+        return jsonify({"error": "Audio file too large (max 10MB)"}), 400
+        
+    if not audio_file.filename.lower().endswith(('.wav', '.mp3', '.ogg')):
+        return jsonify({"error": "Invalid audio format"}), 400
+
+    try:
+        # Process audio
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
+            audio_file.save(temp_audio.name)
+            transcript = evaluator.transcribe(temp_audio.name)
+            
+            # Get evaluation using existing LLM chain
+            evaluation = llm_chain.run({
+                "question": f"""
+                IELTS SPEAKING {test_part.upper()} EVALUATION:
+                
+                Question: {original_question}
+                Response: {transcript}
+                
+                Evaluate based on:
+                1. Fluency & Coherence (0-9)
+                2. Lexical Resource (0-9)
+                3. Grammatical Range (0-9)
+                4. Pronunciation (0-9)
+                
+                Provide detailed feedback.
+                """
+            })
+            
+        return jsonify({
+            "question": original_question,
+            "transcript": transcript,
+            "evaluation": evaluation,
+            "status": "success"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if 'temp_audio' in locals():
+            os.unlink(temp_audio.name)
