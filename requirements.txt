@@ -1,4 +1,5 @@
-Flask
-flask-cors
-langchain
-langchain-groq
+Flask==3.1.1
+flask_cors==5.0.1
+langchain==0.3.26
+langchain_groq==0.3.6
+openai_whisper==20240930
